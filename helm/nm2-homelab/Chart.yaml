@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nm2-homelab
+description: Network state ingest pipeline — PostgreSQL, Ingest API, Grafana
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

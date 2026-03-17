@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nm2-grafana-data
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.grafana.storage.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.grafana.storage.size }}

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nm2-ingest
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+    app.kubernetes.io/name: nm2-ingest
+spec:
+  replicas: {{ .Values.ingestApi.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nm2-ingest
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nm2-ingest
+    spec:
+      initContainers:
+        - name: db-provisioner
+          image: {{ .Values.dbProvisioner.image }}
+          envFrom:
+            - secretRef:
+                name: nm2-db-credentials
+      containers:
+        - name: ingest-api
+          image: {{ .Values.ingestApi.image }}
+          ports:
+            - containerPort: {{ .Values.ingestApi.port }}
+          env:
+            - name: INGEST_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: nm2-db-credentials
+                  key: INGEST_DB_URI
+            - name: POOL_MIN
+              value: {{ .Values.ingestApi.pool.min | quote }}
+            - name: POOL_MAX
+              value: {{ .Values.ingestApi.pool.max | quote }}
+          resources:
+            {{- toYaml .Values.ingestApi.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.ingestApi.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.ingestApi.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 5

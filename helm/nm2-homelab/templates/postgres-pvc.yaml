@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nm2-postgres-data
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.postgres.storage.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.storage.size }}

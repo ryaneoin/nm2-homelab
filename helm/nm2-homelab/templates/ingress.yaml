@@ -1,0 +1,70 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nm2-ingest-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.ingestApi.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nm2-ingest
+                port:
+                  number: {{ .Values.ingestApi.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nm2-grafana-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.grafana.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nm2-grafana
+                port:
+                  number: {{ .Values.grafana.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nm2-prometheus-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.prometheus.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nm2-prometheus
+                port:
+                  number: {{ .Values.prometheus.port }}
+{{- end }}

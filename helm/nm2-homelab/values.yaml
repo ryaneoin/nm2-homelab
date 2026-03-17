@@ -1,0 +1,146 @@
+# =============================================================================
+# nm2-homelab — Single Values File
+# =============================================================================
+#
+# SECRET MANAGEMENT
+# -----------------
+# This chart uses Kubernetes Secrets directly (templates/secrets.yaml).
+# For production Azure deployment, the dev team should:
+#
+#   Option A — Azure Key Vault CSI Driver (SecretProviderClass):
+#     - Install the CSI driver addon on AKS
+#     - Create a SecretProviderClass CR that maps KV secret names → k8s Secret keys
+#     - The CSI driver creates the k8s Secret automatically, pod mounts it as normal
+#     - The consuming Deployments do NOT change — they still reference the same
+#       Secret names (nm2-db-credentials, nm2-grafana-credentials)
+#
+#   Option B — External Secrets Operator (ExternalSecret CRD):
+#     - Install ESO via Helm
+#     - Create ExternalSecret CRs that sync KV secrets → k8s Secrets
+#     - Same principle: the k8s Secret names and keys stay identical
+#
+# In both cases, ONLY templates/secrets.yaml changes. All other templates
+# consume secrets by name/key and are unaffected. The secrets.yaml file
+# contains detailed migration comments with example CRDs.
+#
+# The values.yaml secrets block below is ONLY used for the homelab
+# direct-Secret path. In production, these values are ignored — secrets
+# come from Key Vault via whichever mechanism the team chooses.
+#
+# =============================================================================
+
+global:
+  namespace: nm2-homelab
+
+# ---------------------------------------------------------------------------
+# Secrets — CHANGE THESE BEFORE DEPLOYING (homelab only)
+# ---------------------------------------------------------------------------
+secrets:
+  postgres:
+    adminUser: postgres
+    adminPassword: "CHANGE_ME_pg_admin"
+    database: nm2
+  ingest:
+    user: nm2_ingest
+    password: "CHANGE_ME_ingest"
+  grafana:
+    dbUser: nm2_grafana
+    dbPassword: "CHANGE_ME_grafana_ro"
+    adminUser: admin
+    adminPassword: "CHANGE_ME_grafana_admin"
+
+# ---------------------------------------------------------------------------
+# PostgreSQL
+# ---------------------------------------------------------------------------
+# Production: Remove this section entirely. PostgreSQL is deployed via
+# Terraform (Azure Flexible Server) in the primary subscription.
+# Update the connection URIs in Key Vault to point at the Azure PG instance.
+# ---------------------------------------------------------------------------
+postgres:
+  image: postgres:16-alpine
+  storage:
+    size: 5Gi
+    storageClass: local-path        # k3s default; AKS uses managed-csi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  port: 5432
+
+# ---------------------------------------------------------------------------
+# DB Provisioner (init container)
+# ---------------------------------------------------------------------------
+dbProvisioner:
+  image: nm2-homelab/db-provisioner:latest
+
+# ---------------------------------------------------------------------------
+# Ingest API
+# ---------------------------------------------------------------------------
+ingestApi:
+  image: nm2-homelab/ingest-api:latest
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  pool:
+    min: 2
+    max: 10
+
+# ---------------------------------------------------------------------------
+# Prometheus
+# ---------------------------------------------------------------------------
+prometheus:
+  image: prom/prometheus:v2.51.2
+  replicas: 1
+  port: 9090
+  storage:
+    size: 5Gi
+    storageClass: local-path        # AKS: managed-csi
+  retention: 30d
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Grafana
+# ---------------------------------------------------------------------------
+grafana:
+  image: grafana/grafana:11.4.0
+  replicas: 1
+  port: 3000
+  storage:
+    size: 1Gi
+    storageClass: local-path
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# Ingress — assumes Traefik (k3s default)
+# Production: swap className to nginx or appgw and adjust annotations.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: traefik
+  ingestApi:
+    host: ingest.nm2.local
+  grafana:
+    host: grafana.nm2.local
+  prometheus:
+    host: prometheus.nm2.local

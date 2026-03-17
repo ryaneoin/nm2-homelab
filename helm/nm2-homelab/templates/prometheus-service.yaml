@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nm2-prometheus
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "nm2.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: nm2-prometheus
+  ports:
+    - port: {{ .Values.prometheus.port }}
+      targetPort: {{ .Values.prometheus.port }}
+  type: ClusterIP
