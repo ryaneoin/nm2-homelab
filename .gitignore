@@ -24,5 +24,6 @@ venv/
 # Helm
 helm/nm2-homelab/charts/
 
-# Local values overrides with real secrets — NEVER commit
+# Values overrides with real secrets — NEVER commit
 helm/nm2-homelab/values-local.yaml
+helm/nm2-homelab/values-azure.yaml
