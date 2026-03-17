@@ -29,5 +29,6 @@ data:
           sslmode: disable
           postgresVersion: 1600
           timescaledb: false
+          searchPath: nm2
         isDefault: false
         editable: true
