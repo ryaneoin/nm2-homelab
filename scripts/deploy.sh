@@ -17,6 +17,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 IMAGES_DIR="$PROJECT_ROOT/images"
 CHART_DIR="$PROJECT_ROOT/helm/nm2-homelab"
+VALUES_FILE="$CHART_DIR/values.yaml"
+VALUES_LOCAL="$CHART_DIR/values-local.yaml"
 
 RELEASE_NAME="nm2-homelab"
 NAMESPACE="nm2-homelab"
@@ -33,6 +35,13 @@ for arg in "$@"; do
         --template-only) TEMPLATE_ONLY=true ;;
     esac
 done
+
+# Build values file args — layer local overrides if present
+HELM_VALUES=(-f "$VALUES_FILE")
+if [ -f "$VALUES_LOCAL" ]; then
+    echo "[info] Found values-local.yaml — layering local overrides"
+    HELM_VALUES+=(-f "$VALUES_LOCAL")
+fi
 
 # ---------------------------------------------------------------------------
 # Build & load images
@@ -79,6 +88,7 @@ if [ "$TEMPLATE_ONLY" = true ]; then
     echo " Rendering templates (dry-run)"
     echo "========================================"
     helm template "$RELEASE_NAME" "$CHART_DIR" \
+        "${HELM_VALUES[@]}" \
         --namespace "$NAMESPACE"
     exit 0
 fi
@@ -87,6 +97,7 @@ echo "========================================"
 echo " Deploying with Helm"
 echo "========================================"
 helm upgrade --install "$RELEASE_NAME" "$CHART_DIR" \
+    "${HELM_VALUES[@]}" \
     --namespace "$NAMESPACE" \
     --create-namespace \
     --wait \
@@ -97,14 +108,9 @@ echo "========================================"
 echo " Deployment complete"
 echo "========================================"
 echo ""
-echo "Ingest API:   http://ingest.nm2.local/healthz"
-echo "Grafana:      http://grafana.nm2.local"
-echo "Prometheus:   http://prometheus.nm2.local"
-echo ""
-echo "Add to /etc/hosts (or DNS):"
-echo "  <k3s-node-ip>  ingest.nm2.local grafana.nm2.local prometheus.nm2.local"
+echo "Check your ingress hosts in values (or values-local.yaml)."
 echo ""
 echo "To test ingest:"
-echo '  curl -X POST http://ingest.nm2.local/v1/ingest/devices \'
+echo '  curl -X POST http://<ingest-host>/v1/ingest/devices \'
 echo '    -H "Content-Type: application/json" \'
 echo '    -d '"'"'{"records": [{"device_id": "lab-spine1", "hostname": "spine1.lab", "platform": "eos"}]}'"'"''

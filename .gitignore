@@ -24,6 +24,5 @@ venv/
 # Helm
 helm/nm2-homelab/charts/
 
-# Do NOT commit values overrides with real secrets
-# values-local.yaml
-# values-prod.yaml
+# Local values overrides with real secrets — NEVER commit
+helm/nm2-homelab/values-local.yaml
