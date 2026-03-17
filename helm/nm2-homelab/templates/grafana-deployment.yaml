@@ -15,7 +15,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nm2-grafana
+        {{- if .Values.keyvault.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
+      {{- if .Values.keyvault.enabled }}
+      serviceAccountName: nm2-workload-identity
+      {{- end }}
       securityContext:
         fsGroup: 472
       containers:
@@ -35,6 +41,11 @@ spec:
             - name: datasources
               mountPath: /etc/grafana/provisioning/datasources
               readOnly: true
+            {{- if .Values.keyvault.enabled }}
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.grafana.resources | nindent 12 }}
           readinessProbe:
@@ -56,3 +67,11 @@ spec:
         - name: datasources
           configMap:
             name: nm2-grafana-datasources
+        {{- if .Values.keyvault.enabled }}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: nm2-keyvault-secrets
+        {{- end }}

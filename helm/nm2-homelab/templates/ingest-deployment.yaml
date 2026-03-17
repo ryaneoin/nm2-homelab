@@ -15,7 +15,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nm2-ingest
+        {{- if .Values.keyvault.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
+      {{- if .Values.keyvault.enabled }}
+      serviceAccountName: nm2-workload-identity
+      {{- end }}
       initContainers:
         - name: db-provisioner
           image: {{ .Values.dbProvisioner.image }}
@@ -23,6 +29,12 @@ spec:
           envFrom:
             - secretRef:
                 name: nm2-db-credentials
+          {{- if .Values.keyvault.enabled }}
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          {{- end }}
       containers:
         - name: ingest-api
           image: {{ .Values.ingestApi.image }}
@@ -39,6 +51,12 @@ spec:
               value: {{ .Values.ingestApi.pool.min | quote }}
             - name: POOL_MAX
               value: {{ .Values.ingestApi.pool.max | quote }}
+          {{- if .Values.keyvault.enabled }}
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.ingestApi.resources | nindent 12 }}
           livenessProbe:
@@ -53,3 +71,12 @@ spec:
               port: {{ .Values.ingestApi.port }}
             initialDelaySeconds: 3
             periodSeconds: 5
+      {{- if .Values.keyvault.enabled }}
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: nm2-keyvault-secrets
+      {{- end }}

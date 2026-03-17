@@ -17,7 +17,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: nm2-postgres
+        {{- if .Values.keyvault.enabled }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
+      {{- if .Values.keyvault.enabled }}
+      serviceAccountName: nm2-workload-identity
+      {{- end }}
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
@@ -44,6 +50,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            {{- if .Values.keyvault.enabled }}
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
           readinessProbe:
@@ -60,3 +71,11 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: nm2-postgres-data
+        {{- if .Values.keyvault.enabled }}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: nm2-keyvault-secrets
+        {{- end }}

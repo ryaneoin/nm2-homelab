@@ -4,28 +4,21 @@
 #
 # SECRET MANAGEMENT
 # -----------------
-# This chart uses Kubernetes Secrets directly (templates/secrets.yaml).
-# For production Azure deployment, the dev team should:
+# This chart supports two modes, controlled by keyvault.enabled:
 #
-#   Option A — Azure Key Vault CSI Driver (SecretProviderClass):
-#     - Install the CSI driver addon on AKS
-#     - Create a SecretProviderClass CR that maps KV secret names → k8s Secret keys
-#     - The CSI driver creates the k8s Secret automatically, pod mounts it as normal
-#     - The consuming Deployments do NOT change — they still reference the same
-#       Secret names (nm2-db-credentials, nm2-grafana-credentials)
+#   keyvault.enabled: false (default — homelab)
+#     Renders standard Kubernetes Secrets from the secrets{} block below.
 #
-#   Option B — External Secrets Operator (ExternalSecret CRD):
-#     - Install ESO via Helm
-#     - Create ExternalSecret CRs that sync KV secrets → k8s Secrets
-#     - Same principle: the k8s Secret names and keys stay identical
+#   keyvault.enabled: true (Azure production)
+#     Renders a SecretProviderClass (Azure Key Vault CSI driver) that syncs
+#     Key Vault secrets → Kubernetes Secrets with the same names and keys.
+#     Uses AKS workload identity for authentication — no client secrets needed.
+#     The secrets{} block is ignored; all values come from Key Vault.
 #
-# In both cases, ONLY templates/secrets.yaml changes. All other templates
-# consume secrets by name/key and are unaffected. The secrets.yaml file
-# contains detailed migration comments with example CRDs.
-#
-# The values.yaml secrets block below is ONLY used for the homelab
-# direct-Secret path. In production, these values are ignored — secrets
-# come from Key Vault via whichever mechanism the team chooses.
+# In both modes, all Deployments reference the same two k8s Secrets:
+#   - nm2-db-credentials
+#   - nm2-grafana-credentials
+# No Deployment templates change between modes.
 #
 # =============================================================================
 
@@ -33,7 +26,21 @@ global:
   namespace: nm2-homelab
 
 # ---------------------------------------------------------------------------
-# Secrets — CHANGE THESE BEFORE DEPLOYING (homelab only)
+# Azure Key Vault CSI integration (disabled by default)
+# ---------------------------------------------------------------------------
+# deploy-azure.sh populates these values automatically.
+# For manual setup: enable the CSI addon and workload identity on AKS,
+# create a managed identity with "Key Vault Secrets User" role,
+# then fill in the values below.
+# ---------------------------------------------------------------------------
+keyvault:
+  enabled: false
+  name: ""                    # e.g. kv-nm2-homelab
+  tenantId: ""                # Azure AD tenant ID
+  clientId: ""                # Managed identity client ID
+
+# ---------------------------------------------------------------------------
+# Secrets — used ONLY when keyvault.enabled is false
 # ---------------------------------------------------------------------------
 secrets:
   postgres:
