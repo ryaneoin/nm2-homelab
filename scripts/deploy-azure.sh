@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # =============================================================================
-# nm2-homelab Azure deployment with Key Vault CSI
+# nm2-homelab Azure deployment with Key Vault CSI + public ingress
 #
-# Provisions AKS + ACR + Key Vault + workload identity, builds and pushes
-# images, then deploys the Helm chart with secrets sourced from Key Vault.
+# Provisions AKS + ACR + Key Vault + workload identity + NGINX ingress,
+# builds and pushes images, exposes services via nip.io DNS with basic auth.
 #
 # Usage:
 #   ./scripts/deploy-azure.sh              # full provision + build + deploy
@@ -13,7 +13,7 @@ set -euo pipefail
 #   ./scripts/deploy-azure.sh --skip-build # skip image build/push
 #   ./scripts/deploy-azure.sh --teardown   # delete everything
 #
-# Estimated cost: ~€2-3/day (Standard_B2s node + Basic ACR + KV standard)
+# Estimated cost: ~€2-3/day (Standard_B2s node + Basic ACR + KV + LB)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ AKS_NODE_COUNT=1
 KV_NAME="kv-nm2-homelab"
 IDENTITY_NAME="id-nm2-homelab"
 
-# Passwords for the demo
+# Passwords
 PG_ADMIN_USER="postgres"
 PG_ADMIN_PASSWORD="pg_admin_super"
 PG_DATABASE="nm2"
@@ -38,6 +38,10 @@ GRAFANA_DB_USER="nm2_grafana"
 GRAFANA_DB_PASSWORD="grafana_reader"
 GRAFANA_ADMIN_USER="admin"
 GRAFANA_ADMIN_PASSWORD="grafana_admin"
+
+# Basic auth for ingress (protects ingest API and Prometheus)
+BASIC_AUTH_USER="nm2"
+BASIC_AUTH_PASSWORD="nm2_secure_api"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -74,7 +78,6 @@ if [ "$TEARDOWN" = true ]; then
     if [ "$confirm" = "yes" ]; then
         echo "==> Deleting resource group..."
         az group delete --name "$RESOURCE_GROUP" --yes --no-wait
-        # Key Vault has soft-delete; purge to avoid name conflicts on redeploy
         echo "==> Purging Key Vault (soft-delete)..."
         az keyvault purge --name "$KV_NAME" --location "$LOCATION" 2>/dev/null || true
         echo "Deletion initiated. Check Azure portal for status."
@@ -99,7 +102,7 @@ if [ "$SKIP_INFRA" = false ]; then
         --location "$LOCATION" \
         --output none
 
-    # Container Registry (Basic tier)
+    # Container Registry
     echo "==> Creating ACR..."
     az acr create \
         --resource-group "$RESOURCE_GROUP" \
@@ -148,7 +151,7 @@ if [ "$SKIP_INFRA" = false ]; then
     TENANT_ID=$(az account show --query tenantId -o tsv)
     KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
 
-    # Grant identity "Key Vault Secrets User" on the KV
+    # Grant identity "Key Vault Secrets User"
     echo "==> Assigning Key Vault Secrets User role..."
     az role assignment create \
         --role "Key Vault Secrets User" \
@@ -157,7 +160,7 @@ if [ "$SKIP_INFRA" = false ]; then
         --scope "$KV_ID" \
         --output none
 
-    # Grant current user "Key Vault Secrets Officer" to populate secrets
+    # Grant current user "Key Vault Secrets Officer"
     CURRENT_USER_ID=$(az ad signed-in-user show --query id -o tsv)
     echo "==> Granting current user secrets access..."
     az role assignment create \
@@ -171,7 +174,7 @@ if [ "$SKIP_INFRA" = false ]; then
     echo "==> Waiting for RBAC propagation (30s)..."
     sleep 30
 
-    # Federated credential: k8s ServiceAccount → managed identity
+    # Federated credential
     AKS_OIDC_ISSUER=$(az aks show \
         --resource-group "$RESOURCE_GROUP" \
         --name "$AKS_NAME" \
@@ -239,6 +242,60 @@ ACR_LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
 echo "==> ACR login server: ${ACR_LOGIN_SERVER}"
 
 # ---------------------------------------------------------------------------
+# Install NGINX Ingress Controller
+# ---------------------------------------------------------------------------
+echo "========================================"
+echo " Installing NGINX Ingress Controller"
+echo "========================================"
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
+helm repo update
+
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+    --namespace ingress-nginx \
+    --create-namespace \
+    --set controller.replicaCount=1 \
+    --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"="/healthz" \
+    --wait \
+    --timeout 5m
+
+# Wait for external IP
+echo "==> Waiting for external IP (up to 3 minutes)..."
+EXTERNAL_IP=""
+for i in $(seq 1 36); do
+    EXTERNAL_IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    if [ -n "$EXTERNAL_IP" ]; then
+        break
+    fi
+    sleep 5
+done
+
+if [ -z "$EXTERNAL_IP" ]; then
+    echo "ERROR: Could not get external IP after 3 minutes."
+    echo "Check: kubectl -n ingress-nginx get svc"
+    exit 1
+fi
+
+echo "==> External IP: ${EXTERNAL_IP}"
+
+# ---------------------------------------------------------------------------
+# Generate htpasswd for basic auth
+# ---------------------------------------------------------------------------
+echo "==> Generating htpasswd..."
+# Use htpasswd if available, otherwise fall back to openssl
+if command -v htpasswd &>/dev/null; then
+    HTPASSWD_DATA=$(htpasswd -bn "$BASIC_AUTH_USER" "$BASIC_AUTH_PASSWORD")
+else
+    HTPASSWD_DATA="${BASIC_AUTH_USER}:$(openssl passwd -apr1 "$BASIC_AUTH_PASSWORD")"
+fi
+
+# nip.io hostnames — no DNS config needed, resolves automatically
+INGEST_HOST="ingest.${EXTERNAL_IP}.nip.io"
+GRAFANA_HOST="grafana.${EXTERNAL_IP}.nip.io"
+PROMETHEUS_HOST="prometheus.${EXTERNAL_IP}.nip.io"
+
+# ---------------------------------------------------------------------------
 # Build & push images
 # ---------------------------------------------------------------------------
 build_and_push() {
@@ -267,10 +324,6 @@ fi
 # ---------------------------------------------------------------------------
 # Generate values-azure.yaml
 # ---------------------------------------------------------------------------
-# Note: secrets{} block is still needed even with KV enabled — the Grafana
-# datasource ConfigMap template references these values for rendering.
-# The k8s Secrets themselves come from Key Vault, not from this block.
-# ---------------------------------------------------------------------------
 echo "==> Generating ${VALUES_AZURE}..."
 cat > "$VALUES_AZURE" <<VALUESEOF
 # Auto-generated by deploy-azure.sh — do not commit
@@ -281,8 +334,8 @@ keyvault:
   tenantId: "${TENANT_ID}"
   clientId: "${IDENTITY_CLIENT_ID}"
 
-# These values are used ONLY for Grafana datasource ConfigMap rendering.
-# The actual k8s Secrets are synced from Key Vault via SecretProviderClass.
+# Values for Grafana datasource ConfigMap rendering.
+# k8s Secrets come from Key Vault, not this block.
 secrets:
   postgres:
     adminUser: "${PG_ADMIN_USER}"
@@ -309,6 +362,7 @@ postgres:
     storageClass: managed-csi
 
 prometheus:
+  remoteWriteReceiver: true
   storage:
     size: 1Gi
     storageClass: managed-csi
@@ -319,7 +373,17 @@ grafana:
     storageClass: managed-csi
 
 ingress:
-  enabled: false
+  enabled: true
+  className: nginx
+  basicAuth:
+    enabled: true
+    htpasswd: "${HTPASSWD_DATA}"
+  ingestApi:
+    host: "${INGEST_HOST}"
+  grafana:
+    host: "${GRAFANA_HOST}"
+  prometheus:
+    host: "${PROMETHEUS_HOST}"
 VALUESEOF
 
 # ---------------------------------------------------------------------------
@@ -345,21 +409,32 @@ echo ""
 kubectl -n "$NAMESPACE" get pods
 
 echo ""
-echo "Secrets sourced from Azure Key Vault: ${KV_NAME}"
+echo "Secrets:     Azure Key Vault (${KV_NAME})"
+echo "External IP: ${EXTERNAL_IP}"
 echo ""
-echo "--- Access via port-forward ---"
+echo "--- Public Endpoints ---"
 echo ""
-echo "Grafana:"
-echo "  kubectl -n ${NAMESPACE} port-forward svc/nm2-grafana 3000:3000"
-echo "  open http://localhost:3000  (${GRAFANA_ADMIN_USER} / ${GRAFANA_ADMIN_PASSWORD})"
+echo "Grafana:     http://${GRAFANA_HOST}"
+echo "  Login:     ${GRAFANA_ADMIN_USER} / ${GRAFANA_ADMIN_PASSWORD}"
 echo ""
-echo "Ingest API:"
-echo "  kubectl -n ${NAMESPACE} port-forward svc/nm2-ingest 8080:8080"
-echo "  curl http://localhost:8080/healthz"
+echo "Ingest API:  http://${INGEST_HOST}/healthz"
+echo "  Auth:      ${BASIC_AUTH_USER} / ${BASIC_AUTH_PASSWORD}"
 echo ""
-echo "Prometheus:"
-echo "  kubectl -n ${NAMESPACE} port-forward svc/nm2-prometheus 9090:9090"
-echo "  open http://localhost:9090"
+echo "  Test:"
+echo "  curl -u ${BASIC_AUTH_USER}:${BASIC_AUTH_PASSWORD} \\"
+echo "    -X POST http://${INGEST_HOST}/v1/ingest/devices \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"records\": [{\"device_id\": \"lab-spine1\", \"hostname\": \"spine1.lab\", \"platform\": \"eos\"}]}'"
+echo ""
+echo "Prometheus:  http://${PROMETHEUS_HOST}"
+echo "  Auth:      ${BASIC_AUTH_USER} / ${BASIC_AUTH_PASSWORD}"
+echo ""
+echo "  Remote write from home:"
+echo "  remote_write:"
+echo "    - url: http://${PROMETHEUS_HOST}/api/v1/write"
+echo "      basic_auth:"
+echo "        username: ${BASIC_AUTH_USER}"
+echo "        password: ${BASIC_AUTH_PASSWORD}"
 echo ""
 echo "--- Teardown when done ---"
 echo "  ./scripts/deploy-azure.sh --teardown"

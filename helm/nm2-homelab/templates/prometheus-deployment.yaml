@@ -31,6 +31,9 @@ spec:
             - "--storage.tsdb.path=/prometheus"
             - "--storage.tsdb.retention.time={{ .Values.prometheus.retention }}"
             - "--web.enable-lifecycle"
+            {{- if .Values.prometheus.remoteWriteReceiver }}
+            - "--web.enable-remote-write-receiver"
+            {{- end }}
           ports:
             - containerPort: {{ .Values.prometheus.port }}
           volumeMounts:

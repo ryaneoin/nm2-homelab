@@ -1,4 +1,15 @@
 {{- if .Values.ingress.enabled }}
+{{/*
+  Ingress resources for all exposed services.
+
+  Basic auth is applied to ingest API and Prometheus via nginx annotations.
+  Grafana has its own authentication and doesn't need basic auth.
+
+  For homelab (Traefik): no basic auth annotations are rendered.
+  For Azure (nginx): basic auth is applied when ingress.basicAuth.enabled is true.
+*/}}
+
+{{/* ----- Ingest API ----- */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -7,7 +18,14 @@ metadata:
   labels:
     {{- include "nm2.labels" . | nindent 4 }}
   annotations:
+    {{- if eq .Values.ingress.className "traefik" }}
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    {{- end }}
+    {{- if and (eq .Values.ingress.className "nginx") .Values.ingress.basicAuth.enabled }}
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: nm2-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "nm2-homelab ingest API"
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -21,7 +39,9 @@ spec:
                 name: nm2-ingest
                 port:
                   number: {{ .Values.ingestApi.port }}
+
 ---
+{{/* ----- Grafana (no basic auth — has its own login) ----- */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -30,7 +50,9 @@ metadata:
   labels:
     {{- include "nm2.labels" . | nindent 4 }}
   annotations:
+    {{- if eq .Values.ingress.className "traefik" }}
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -44,7 +66,9 @@ spec:
                 name: nm2-grafana
                 port:
                   number: {{ .Values.grafana.port }}
+
 ---
+{{/* ----- Prometheus ----- */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -53,7 +77,14 @@ metadata:
   labels:
     {{- include "nm2.labels" . | nindent 4 }}
   annotations:
+    {{- if eq .Values.ingress.className "traefik" }}
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    {{- end }}
+    {{- if and (eq .Values.ingress.className "nginx") .Values.ingress.basicAuth.enabled }}
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: nm2-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "nm2-homelab Prometheus"
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:

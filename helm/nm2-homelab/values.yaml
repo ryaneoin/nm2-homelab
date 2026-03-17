@@ -28,16 +28,11 @@ global:
 # ---------------------------------------------------------------------------
 # Azure Key Vault CSI integration (disabled by default)
 # ---------------------------------------------------------------------------
-# deploy-azure.sh populates these values automatically.
-# For manual setup: enable the CSI addon and workload identity on AKS,
-# create a managed identity with "Key Vault Secrets User" role,
-# then fill in the values below.
-# ---------------------------------------------------------------------------
 keyvault:
   enabled: false
-  name: ""                    # e.g. kv-nm2-homelab
-  tenantId: ""                # Azure AD tenant ID
-  clientId: ""                # Managed identity client ID
+  name: ""
+  tenantId: ""
+  clientId: ""
 
 # ---------------------------------------------------------------------------
 # Secrets — used ONLY when keyvault.enabled is false
@@ -59,15 +54,11 @@ secrets:
 # ---------------------------------------------------------------------------
 # PostgreSQL
 # ---------------------------------------------------------------------------
-# Production: Remove this section entirely. PostgreSQL is deployed via
-# Terraform (Azure Flexible Server) in the primary subscription.
-# Update the connection URIs in Key Vault to point at the Azure PG instance.
-# ---------------------------------------------------------------------------
 postgres:
   image: postgres:16-alpine
   storage:
     size: 5Gi
-    storageClass: local-path        # k3s default; AKS uses managed-csi
+    storageClass: local-path
   resources:
     requests:
       cpu: 100m
@@ -104,13 +95,18 @@ ingestApi:
 # ---------------------------------------------------------------------------
 # Prometheus
 # ---------------------------------------------------------------------------
+# remoteWriteReceiver: enables --web.enable-remote-write-receiver so remote
+#   Prometheus instances or agents can push metrics via POST /api/v1/write.
+#   Protected by basic auth when exposed via nginx ingress.
+# ---------------------------------------------------------------------------
 prometheus:
   image: prom/prometheus:v2.51.2
   replicas: 1
   port: 9090
+  remoteWriteReceiver: false
   storage:
     size: 5Gi
-    storageClass: local-path        # AKS: managed-csi
+    storageClass: local-path
   retention: 30d
   resources:
     requests:
@@ -139,12 +135,19 @@ grafana:
       memory: 256Mi
 
 # ---------------------------------------------------------------------------
-# Ingress — assumes Traefik (k3s default)
-# Production: swap className to nginx or appgw and adjust annotations.
+# Ingress
+# ---------------------------------------------------------------------------
+# className: traefik (k3s default) or nginx (AKS)
+# basicAuth: when enabled with nginx, ingest API and Prometheus require
+#   HTTP Basic Auth. Grafana is excluded (has its own login).
+#   htpasswd: pre-generated htpasswd string (deploy script generates this)
 # ---------------------------------------------------------------------------
 ingress:
   enabled: true
   className: traefik
+  basicAuth:
+    enabled: false
+    htpasswd: ""
   ingestApi:
     host: ingest.nm2.local
   grafana:
