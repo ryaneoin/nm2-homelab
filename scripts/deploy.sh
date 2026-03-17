@@ -23,6 +23,9 @@ VALUES_LOCAL="$CHART_DIR/values-local.yaml"
 RELEASE_NAME="nm2-homelab"
 NAMESPACE="nm2-homelab"
 
+# Target platform — charlie is amd64, Mac builds arm64 by default
+TARGET_PLATFORM="linux/amd64"
+
 # k3s node(s) to load images onto — adjust as needed
 K3S_NODE="charlie"
 
@@ -51,8 +54,8 @@ build_and_load() {
     local dir=$2
     local tag="nm2-homelab/${name}:latest"
 
-    echo "==> Building ${tag}..."
-    docker build -t "$tag" "$dir"
+    echo "==> Building ${tag} (${TARGET_PLATFORM})..."
+    docker build --platform "$TARGET_PLATFORM" -t "$tag" "$dir"
 
     echo "==> Exporting ${tag} to tarball..."
     docker save "$tag" -o "/tmp/${name}.tar"
