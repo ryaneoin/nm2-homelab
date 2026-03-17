@@ -19,12 +19,14 @@ spec:
       initContainers:
         - name: db-provisioner
           image: {{ .Values.dbProvisioner.image }}
+          imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:
                 name: nm2-db-credentials
       containers:
         - name: ingest-api
           image: {{ .Values.ingestApi.image }}
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: {{ .Values.ingestApi.port }}
           env:
